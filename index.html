@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Force Table Simulator</title>
+  <style>
+    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    body { margin: 0; background: #0b0f17; color: #e9eef7; }
+    .wrap { display: grid; grid-template-columns: 360px 1fr; gap: 14px; padding: 14px; }
+    .panel { background: #111827; border: 1px solid #22304a; border-radius: 14px; padding: 14px; }
+    h1 { font-size: 18px; margin: 0 0 10px; }
+    h2 { font-size: 14px; margin: 14px 0 8px; color: #cbd5e1; }
+    .row { display: grid; grid-template-columns: 1fr 110px; gap: 10px; align-items: center; margin: 8px 0; }
+    .row label { font-size: 12px; color: #cbd5e1; }
+    input[type="range"] { width: 100%; }
+    input[type="number"] { width: 100%; padding: 8px; border-radius: 10px; border: 1px solid #2a3a58; background: #0b1220; color: #e9eef7; }
+    select, button { width: 100%; padding: 10px; border-radius: 12px; border: 1px solid #2a3a58; background: #0b1220; color: #e9eef7; }
+    button { cursor: pointer; background: #0b1220; }
+    button:hover { border-color: #3b82f6; }
+    .small { font-size: 12px; color: #cbd5e1; line-height: 1.35; }
+    .pill { display: inline-block; padding: 4px 8px; border-radius: 999px; border: 1px solid #2a3a58; background: #0b1220; font-size: 12px; }
+    .status { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    canvas { width: 100%; height: calc(100vh - 28px); background: #0b1220; border-radius: 14px; border: 1px solid #22304a; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .muted { color: #9fb0cc; }
+    .divider { height: 1px; background: #22304a; margin: 12px 0; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="panel">
+      <h1>Force Table Simulator</h1>
+      <div class="small">
+        Pick up to <b>3 pulleys</b>. Each pulley applies a tension equal to the hanging weight:
+        <span class="pill">T = m g</span> (ideal, frictionless pulley). Angles are measured
+        <b>counter-clockwise from +x</b>.
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="row">
+        <label for="nPulleys">Number of pulleys</label>
+        <select id="nPulleys">
+          <option value="1">1 pulley</option>
+          <option value="2" selected>2 pulleys</option>
+          <option value="3">3 pulleys</option>
+        </select>
+      </div>
+
+      <div class="row">
+        <label for="mode">Mode</label>
+        <select id="mode">
+          <option value="free" selected>Student adjusts all pulleys</option>
+          <option value="solve3">Solve pulley 3 to balance pulleys 1 & 2</option>
+        </select>
+      </div>
+
+      <div class="divider"></div>
+
+      <h2>Pulley 1</h2>
+      <div class="row">
+        <label>Angle θ₁ (deg)</label>
+        <input id="a1" type="number" min="0" max="360" step="0.1" value="0">
+      </div>
+      <div class="row">
+        <label>Mass m₁ (g)</label>
+        <input id="m1" type="number" min="0" step="1" value="100">
+      </div>
+
+      <h2>Pulley 2</h2>
+      <div class="row">
+        <label>Angle θ₂ (deg)</label>
+        <input id="a2" type="number" min="0" max="360" step="0.1" value="120">
+      </div>
+      <div class="row">
+        <label>Mass m₂ (g)</label>
+        <input id="m2" type="number" min="0" step="1" value="200">
+      </div>
+
+      <div id="p3Block">
+        <h2>Pulley 3</h2>
+        <div class="row">
+          <label>Angle θ₃ (deg)</label>
+          <input id="a3" type="number" min="0" max="360" step="0.1" value="240">
+        </div>
+        <div class="row">
+          <label>Mass m₃ (g)</label>
+          <input id="m3" type="number" min="0" step="1" value="100">
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="status">
+        <span class="pill" id="eqBadge">—</span>
+        <span class="pill">Tolerance: <span id="tolTxt">0.05 N</span></span>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <label>Equilibrium tolerance (N)</label>
+        <input id="tol" type="number" min="0.001" step="0.001" value="0.05">
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="grid2">
+        <button id="randomize">Randomize angles</button>
+        <button id="reset">Reset</button>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="small muted" id="readout"></div>
+    </div>
+
+    <canvas id="cv"></canvas>
+  </div>
+
+<script>
+(() => {
+  const g = 9.81; // m/s^2
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+
+  const el = (id) => document.getElementById(id);
+  const nPulleys = el('nPulleys');
+  const mode = el('mode');
+  const p3Block = el('p3Block');
+
+  const a1 = el('a1'), a2 = el('a2'), a3 = el('a3');
+  const m1 = el('m1'), m2 = el('m2'), m3 = el('m3');
+  const tol = el('tol'), tolTxt = el('tolTxt');
+  const eqBadge = el('eqBadge');
+  const readout = el('readout');
+
+  const randomizeBtn = el('randomize');
+  const resetBtn = el('reset');
+
+  function resize() {
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    const rect = cv.getBoundingClientRect();
+    cv.width = Math.floor(rect.width * dpr);
+    cv.height = Math.floor(rect.height * dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  function deg2rad(d) { return d * Math.PI / 180; }
+  function clampAngle(d) {
+    // normalize into [0,360)
+    let x = d % 360;
+    if (x < 0) x += 360;
+    return x;
+  }
+
+  function forceFromMassAngle(m_g, ang_deg) {
+    const m_kg = Math.max(0, m_g) / 1000;
+    const T = m_kg * g; // Newtons
+    const th = deg2rad(ang_deg);
+    return { T, Fx: T*Math.cos(th), Fy: T*Math.sin(th) };
+  }
+
+  function vecMag(x,y){ return Math.hypot(x,y); }
+
+  function solvePulley3(f1, f2) {
+    // Need F3 = -(F1 + F2)
+    const Rx = f1.Fx + f2.Fx;
+    const Ry = f1.Fy + f2.Fy;
+    const F3x = -Rx, F3y = -Ry;
+    const T3 = vecMag(F3x, F3y);
+    const ang = clampAngle(Math.atan2(F3y, F3x) * 180 / Math.PI);
+    const m3_kg = (T3 / g);
+    const m3_g = m3_kg * 1000;
+    return { T3, ang, m3_g, F3x, F3y };
+  }
+
+  function drawArrow(x0,y0, x1,y1, label) {
+    ctx.save();
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x0,y0);
+    ctx.lineTo(x1,y1);
+    ctx.stroke();
+
+    // arrow head
+    const ang = Math.atan2(y1-y0, x1-x0);
+    const head = 10;
+    ctx.beginPath();
+    ctx.moveTo(x1,y1);
+    ctx.lineTo(x1 - head*Math.cos(ang - Math.PI/7), y1 - head*Math.sin(ang - Math.PI/7));
+    ctx.lineTo(x1 - head*Math.cos(ang + Math.PI/7), y1 - head*Math.sin(ang + Math.PI/7));
+    ctx.closePath();
+    ctx.fill();
+
+    // label
+    ctx.font = '12px system-ui';
+    ctx.fillText(label, x1 + 6, y1 + 4);
+    ctx.restore();
+  }
+
+  function render() {
+    tolTxt.textContent = `${Number(tol.value).toFixed(3)} N`;
+
+    // show/hide pulley 3 controls
+    const N = Number(nPulleys.value);
+    p3Block.style.display = (N === 3) ? 'block' : 'none';
+
+    // read inputs
+    const A1 = clampAngle(Number(a1.value) || 0);
+    const A2 = clampAngle(Number(a2.value) || 0);
+    const A3 = clampAngle(Number(a3.value) || 0);
+    a1.value = A1; a2.value = A2; a3.value = A3;
+
+    const f1 = forceFromMassAngle(Number(m1.value)||0, A1);
+    const f2 = forceFromMassAngle(Number(m2.value)||0, A2);
+
+    let f3 = {T:0,Fx:0,Fy:0};
+    let solved = null;
+
+    if (N === 3) {
+      if (mode.value === 'solve3') {
+        solved = solvePulley3(f1,f2);
+        // overwrite displayed pulley 3 values
+        a3.value = solved.ang.toFixed(1);
+        m3.value = solved.m3_g.toFixed(0);
+        f3 = { T: solved.T3, Fx: solved.F3x, Fy: solved.F3y };
+      } else {
+        f3 = forceFromMassAngle(Number(m3.value)||0, A3);
+      }
+    }
+
+    // resultant
+    const Rx = f1.Fx + f2.Fx + (N===3 ? f3.Fx : 0);
+    const Ry = f1.Fy + f2.Fy + (N===3 ? f3.Fy : 0);
+    const R = vecMag(Rx,Ry);
+
+    const tolN = Math.max(0, Number(tol.value)||0);
+    const isEq = R <= tolN;
+
+    eqBadge.textContent = isEq ? `✅ Equilibrium (|R| = ${R.toFixed(3)} N)` : `❌ Not balanced (|R| = ${R.toFixed(3)} N)`;
+    eqBadge.style.borderColor = isEq ? '#22c55e' : '#ef4444';
+
+    // canvas draw
+    const W = cv.getBoundingClientRect().width;
+    const H = cv.getBoundingClientRect().height;
+    ctx.clearRect(0,0,W,H);
+
+    // center + circle
+    const cx = W/2, cy = H/2;
+    const radius = Math.min(W,H)*0.28;
+
+    // grid
+    ctx.save();
+    ctx.globalAlpha = 0.25;
+    ctx.strokeStyle = '#2a3a58';
+    ctx.lineWidth = 1;
+    for (let x=0; x<=W; x+=40){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+    for (let y=0; y<=H; y+=40){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+    ctx.restore();
+
+    // table circle
+    ctx.save();
+    ctx.strokeStyle = '#3b82f6';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(cx,cy,radius,0,Math.PI*2);
+    ctx.stroke();
+    ctx.restore();
+
+    // scale arrows by max tension so they fit nicely
+    const Ts = [f1.T, f2.T, (N===3?f3.T:0), R];
+    const maxT = Math.max(0.0001, ...Ts);
+    const arrowScale = radius * 0.95 / maxT;
+
+    // draw axes
+    ctx.save();
+    ctx.strokeStyle = '#94a3b8';
+    ctx.fillStyle = '#94a3b8';
+    ctx.lineWidth = 1.5;
+    drawArrow(cx,cy, cx+radius, cy, '+x');
+    drawArrow(cx,cy, cx, cy-radius, '+y');
+    ctx.restore();
+
+    // helper to set color per vector
+    function setColor(hex){
+      ctx.strokeStyle = hex;
+      ctx.fillStyle = hex;
+    }
+
+    // draw forces
+    setColor('#22c55e');
+    drawArrow(cx,cy, cx + f1.Fx*arrowScale, cy - f1.Fy*arrowScale, 'F1');
+
+    setColor('#f59e0b');
+    drawArrow(cx,cy, cx + f2.Fx*arrowScale, cy - f2.Fy*arrowScale, 'F2');
+
+    if (N===3) {
+      setColor('#a78bfa');
+      drawArrow(cx,cy, cx + f3.Fx*arrowScale, cy - f3.Fy*arrowScale, 'F3');
+    }
+
+    // resultant
+    setColor(isEq ? '#22c55e' : '#ef4444');
+    ctx.globalAlpha = 0.95;
+    drawArrow(cx,cy, cx + Rx*arrowScale, cy - Ry*arrowScale, 'R');
+    ctx.globalAlpha = 1;
+
+    // ring markers at pulley angles
+    function markAngle(Adeg, hex, label){
+      const th = deg2rad(Adeg);
+      const px = cx + radius*Math.cos(th);
+      const py = cy - radius*Math.sin(th);
+      ctx.save();
+      ctx.fillStyle = hex;
+      ctx.beginPath();
+      ctx.arc(px,py,6,0,Math.PI*2);
+      ctx.fill();
+      ctx.font = '12px system-ui';
+      ctx.fillText(label, px+8, py+4);
+      ctx.restore();
+    }
+    markAngle(A1, '#22c55e', `θ1=${A1.toFixed(1)}°`);
+    markAngle(A2, '#f59e0b', `θ2=${A2.toFixed(1)}°`);
+    if (N===3) markAngle(Number(a3.value)||0, '#a78bfa', `θ3=${Number(a3.value).toFixed(1)}°`);
+
+    // readout text
+    const fmt = (x) => (x>=0?'+':'') + x.toFixed(3);
+    const lines = [];
+
+    lines.push(`<b>Forces (ideal):</b> T = m g, with g = 9.81 m/s²`);
+    lines.push(`F1: T=${f1.T.toFixed(3)} N, (Fx,Fy)=(${fmt(f1.Fx)}, ${fmt(f1.Fy)})`);
+    lines.push(`F2: T=${f2.T.toFixed(3)} N, (Fx,Fy)=(${fmt(f2.Fx)}, ${fmt(f2.Fy)})`);
+    if (N===3) {
+      lines.push(`F3: T=${f3.T.toFixed(3)} N, (Fx,Fy)=(${fmt(f3.Fx)}, ${fmt(f3.Fy)})`);
+      if (mode.value === 'solve3') {
+        lines.push(`<b>Solved pulley 3:</b> θ3=${Number(a3.value).toFixed(1)}°, m3=${Number(m3.value).toFixed(0)} g`);
+      }
+    } else {
+      lines.push(`<span class="muted">Add a 3rd pulley to balance the system (typical force-table equilibrium).</span>`);
+    }
+
+    lines.push(`<b>Resultant:</b> R = (Rx,Ry)=(${fmt(Rx)}, ${fmt(Ry)}), |R|=${R.toFixed(3)} N`);
+    readout.innerHTML = lines.join('<br/>');
+
+    requestAnimationFrame(render);
+  }
+
+  // simple helpers
+  function randAng() { return (Math.random()*360).toFixed(1); }
+
+  randomizeBtn.addEventListener('click', () => {
+    a1.value = randAng();
+    a2.value = randAng();
+    a3.value = randAng();
+  });
+
+  resetBtn.addEventListener('click', () => {
+    nPulleys.value = '2';
+    mode.value = 'free';
+    a1.value = 0; m1.value = 100;
+    a2.value = 120; m2.value = 200;
+    a3.value = 240; m3.value = 100;
+    tol.value = 0.05;
+  });
+
+  // If mode is solve3, ensure we are in 3 pulleys
+  mode.addEventListener('change', () => {
+    if (mode.value === 'solve3') nPulleys.value = '3';
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>
